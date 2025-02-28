@@ -1,0 +1,20 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-c",
+      "-std=c++17",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-I./include",
+      "-pthread",
+      "-o",
+      "grapher",
+      "src/main.cpp"
+    ],
+    "directory": "/home/light/opengl",
+    "file": "/home/light/opengl/src/main.cpp",
+    "output": "/home/light/opengl/grapher"
+  }
+]
