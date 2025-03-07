@@ -34,7 +34,7 @@ void RenderString(float x, float y, void *font, const char* string, RGB rgb) {
 }
 
 void draw_line(GLfloat cx, GLfloat cy, GLfloat cxx, GLfloat cyy, RGB rgb) {
-  glLineWidth(5.0f); 
+  glLineWidth(3.0f); 
   
   glBegin(GL_LINE_LOOP);
   glColor3f(rgb.r, rgb.g, rgb.b); 
@@ -96,21 +96,27 @@ void draw_graph(Graph_Node *g, bool first = true, bool already_checked = false) 
   
   char format[20];
   sprintf(format, "%i", g->value);
-  RenderString(g->cx, g->cy, GLUT_BITMAP_TIMES_ROMAN_24, format, dracula_fg); 
+  RenderString(g->cx, g->cy, GLUT_BITMAP_TIMES_ROMAN_24, format, dracula_pink);
 
   nodes.push_back(g);
 
   for(Edge& current : g->edges) {
+    draw_edge(&current);
+
     if (!is_in(current.end1->key, nodes)) {
       draw_graph(current.end1, false, true);
-      draw_edge(&current);
     }
     if (!is_in(current.end2->key, nodes)) {
       draw_graph(current.end2, false, true); 
-      draw_edge(&current);
     }
   }
 }
+
+void connect_graphs(Graph_Node* g1, Graph_Node* g2) {
+  Edge e = edge_new(g1, g2, dracula_pink);
+  g1->edges.push_back(e);
+  g2->edges.push_back(e);
+};
 
 void renderScene(void) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -118,13 +124,14 @@ void renderScene(void) {
     // Create nodes with Dracula colors
     Graph_Node g = Graph_Node_new(10, -0.5f, 0.0f, dracula_cyan);
     Graph_Node g2 = Graph_Node_new(20, 0.5f, 0.0f, dracula_cyan);
+    Graph_Node g3 = Graph_Node_new(20, 0.5f, 0.5f, dracula_cyan);
 
     // Create edge with Dracula pink
-    Edge e = edge_new(&g, &g2, dracula_pink);
 
-    g.edges.push_back(e);
-    g2.edges.push_back(e);
-    
+    connect_graphs(&g, &g2);
+    connect_graphs(&g, &g3);
+    connect_graphs(&g2, &g3);
+   
     draw_graph(&g);
 
     glutSwapBuffers();
