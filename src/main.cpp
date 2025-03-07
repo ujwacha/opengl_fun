@@ -8,6 +8,14 @@
 #include <string.h>
 #include <math.h>
 
+// New mode constant for MST
+#define MODE_ADD_NODE       1
+#define MODE_ADD_EDGE       2
+#define MODE_SHORTEST_PATH  3
+#define MODE_EDIT_WEIGHT    4
+#define MODE_DELETE_NODE    5
+#define MODE_MST            6
+
 #define MAX_NODES 100
 #define INF FLT_MAX
 
@@ -16,13 +24,6 @@
 #define BUTTON_WIDTH 130
 #define BUTTON_HEIGHT 40
 #define BUTTON_PADDING 10
-
-// Modes
-#define MODE_ADD_NODE       1
-#define MODE_ADD_EDGE       2
-#define MODE_SHORTEST_PATH  3
-#define MODE_EDIT_WEIGHT    4
-#define MODE_DELETE_NODE    5
 
 int current_mode = MODE_ADD_NODE;
 int selected_node = -1;    // For add edge mode
@@ -63,6 +64,7 @@ void draw_weight_input();
 int find_edge_near(float x, float y);
 float pointToSegmentDistance(float px, float py, float ax, float ay, float bx, float by);
 void delete_node(int node_index);
+void draw_mst();
 
 //
 // --- Utility drawing functions ---
@@ -86,7 +88,7 @@ void draw_string_pixel(int x, int y, char *str) {
 // --- Drawing the graph ---
 //
 
-// Draw nodes as light blue circles with labels centered
+// Draw nodes as light blue circles with centered labels
 void draw_nodes() {
   int num_segments = 50;
   for (int i = 0; i < node_count; i++) {
@@ -117,15 +119,14 @@ void draw_nodes() {
       }
     glEnd();
 
-    // Draw label inside circle (rough centering)
+    // Draw label inside circle (adjust y offset for centering)
     char label[2] = {nodes[i].label, '\0'};
     glColor3f(0.0f, 0.0f, 0.0f);
-    // Adjust offsets as needed for centering
-    draw_string(cx - 0.008f, cy - 0.008f, label);
+    draw_string(cx - 0.008f, cy - 0.02f, label);
   }
 }
 
-// Draw edges as bold light pink lines from circle edge to circle edge
+// Draw edges as bold light pink lines with labels offset perpendicularly
 void draw_edges() {
   glColor3f(1.0f, 0.71f, 0.76f); // light pink
   glLineWidth(4.0f);
@@ -167,24 +168,23 @@ void draw_edges() {
 
     // Perpendicular offset for label (adjust label_offset as needed)
     float label_offset = 0.03f;
-    float perpX = -dy / d; // normalized perpendicular vector x component
-    float perpY = dx / d;  // normalized perpendicular vector y component
+    float perpX = -dy / d; // normalized perpendicular vector
+    float perpY = dx / d;
     float labelX = midX + label_offset * perpX;
     float labelY = midY + label_offset * perpY;
 
     char weight_str[10];
     sprintf(weight_str, "%.1f", edges[i].weight);
-    glColor3f(1.0f, 1.0f, 1.0f); // label in black color
-    // Adjust the label's drawing position for rough centering
+    glColor3f(1.0f, 1.0f, 1.0f);
     draw_string(labelX - 0.015f, labelY - 0.015f, weight_str);
   }
 }
 
-// Draw shortest path segments as silver lines (adjusted to avoid nodes)
+// Draw shortest path segments (only in shortest path mode)
 void draw_shortest_path() {
   if (shortest_path_length < 2)
     return;
-  glColor3f(0/255.0f,38/255.0f,99/255.0f); // silver
+  glColor3f(0.75f, 0.75f, 0.75f); // silver
   glLineWidth(4.0f);
   glBegin(GL_LINES);
   for (int i = 0; i < shortest_path_length - 1; i++) {
@@ -192,7 +192,93 @@ void draw_shortest_path() {
     Node dest = nodes[shortest_path_nodes[i + 1]];
     float dx = dest.x - src.x;
     float dy = dest.y - src.y;
-    float d = sqrt(dx*dx + dy*dy);
+    float d = sqrt(dx * dx + dy * dy);
+    if (d == 0) d = 0.0001f;
+    float offsetX = (dx / d) * NODE_RADIUS;
+    float offsetY = (dy / d) * NODE_RADIUS;
+    float startX = src.x + offsetX;
+    float startY = src.y + offsetY;
+    float endX = dest.x - offsetX;
+    float endY = dest.y - offsetY;
+    glVertex2f(startX, startY);
+    glVertex2f(endX, endY);
+  }
+  glEnd();
+}
+
+//
+// --- Compute and draw the MST using Kruskal's algorithm ---
+//
+
+void draw_mst() {
+  // Structure to hold MST edge info
+  typedef struct {
+    int src, dest;
+    float weight;
+  } MstEdge;
+
+  MstEdge mst_edges[MAX_NODES];
+  int mst_count = 0;
+
+  // Union-Find setup
+  int parent[MAX_NODES];
+  for (int i = 0; i < node_count; i++) {
+    parent[i] = i;
+  }
+  auto find = [&](int x) -> int {
+    while (parent[x] != x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  auto union_set = [&](int x, int y) {
+    int rootx = find(x);
+    int rooty = find(y);
+    parent[rootx] = rooty;
+  };
+
+  // Create an array of indices for edges and sort them by weight (simple bubble sort)
+  int indices[MAX_NODES * MAX_NODES];
+  for (int i = 0; i < edge_count; i++) {
+    indices[i] = i;
+  }
+  for (int i = 0; i < edge_count - 1; i++) {
+    for (int j = i + 1; j < edge_count; j++) {
+      if (edges[indices[j]].weight < edges[indices[i]].weight) {
+        int temp = indices[i];
+        indices[i] = indices[j];
+        indices[j] = temp;
+      }
+    }
+  }
+
+  // Kruskal's algorithm
+  for (int i = 0; i < edge_count; i++) {
+    int idx = indices[i];
+    int u = edges[idx].src;
+    int v = edges[idx].dest;
+    if (find(u) != find(v)) {
+      union_set(u, v);
+      mst_edges[mst_count].src = u;
+      mst_edges[mst_count].dest = v;
+      mst_edges[mst_count].weight = edges[idx].weight;
+      mst_count++;
+      if (mst_count == node_count - 1)
+        break;
+    }
+  }
+
+  // Draw the MST edges (with endpoints offset to node boundaries)
+  glColor3f(1.0f, 0.65f, 0.0f); // orange color for MST
+  glLineWidth(4.0f);
+  glBegin(GL_LINES);
+  for (int i = 0; i < mst_count; i++) {
+    Node src = nodes[mst_edges[i].src];
+    Node dest = nodes[mst_edges[i].dest];
+    float dx = dest.x - src.x;
+    float dy = dest.y - src.y;
+    float d = sqrt(dx * dx + dy * dy);
     if (d == 0) d = 0.0001f;
     float offsetX = (dx / d) * NODE_RADIUS;
     float offsetY = (dy / d) * NODE_RADIUS;
@@ -295,6 +381,19 @@ void draw_menu_pixel() {
   glEnd();
   glColor3f(1.0f, 1.0f, 1.0f);
   draw_string_pixel(15, y + 25, "Delete Node");
+
+  y += BUTTON_HEIGHT + BUTTON_PADDING;
+  // MST button
+  glColor3f(current_mode == MODE_MST ? 0.0f : 0.4f, 0.6f,
+            current_mode == MODE_MST ? 0.9f : 0.4f);
+  glBegin(GL_QUADS);
+    glVertex2i(10, y);
+    glVertex2i(BUTTON_WIDTH + 10, y);
+    glVertex2i(BUTTON_WIDTH + 10, y + BUTTON_HEIGHT);
+    glVertex2i(10, y + BUTTON_HEIGHT);
+  glEnd();
+  glColor3f(1.0f, 1.0f, 1.0f);
+  draw_string_pixel(15, y + 25, "MST");
 
   glPopMatrix();
   glMatrixMode(GL_PROJECTION);
@@ -516,6 +615,8 @@ void mouse(int button, int state, int x, int y) {
         current_mode = MODE_EDIT_WEIGHT;
       else if (y_pos >= 220 && y_pos <= 260)
         current_mode = MODE_DELETE_NODE;
+      else if (y_pos >= 270 && y_pos <= 310)
+        current_mode = MODE_MST;
       glutPostRedisplay();
       return;
     }
@@ -566,6 +667,7 @@ void mouse(int button, int state, int x, int y) {
         delete_node(node);
       }
     }
+    // In MST mode, no direct mouse action is required.
     glutPostRedisplay();
   }
 }
@@ -595,7 +697,7 @@ void keyboard(unsigned char key, int x, int y) {
         weight_input_buffer[len - 1] = '\0';
     } else if ((isdigit(key) || key == '.') && (strlen(weight_input_buffer) < 31)) {
       if (key == '.' && strchr(weight_input_buffer, '.') != NULL) {
-        // Skip adding a second dot
+        // Prevent a second dot
       } else {
         char keyStr[2] = { key, '\0' };
         strncat(weight_input_buffer, keyStr, 1);
@@ -621,9 +723,10 @@ void display() {
   draw_nodes();
   draw_edges();
 
-  // Only show the shortest path if in shortest path mode
   if (current_mode == MODE_SHORTEST_PATH)
     draw_shortest_path();
+  else if (current_mode == MODE_MST)
+    draw_mst();
 
   draw_menu_pixel();
   if (inputting_weight)
