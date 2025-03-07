@@ -8,7 +8,7 @@
 #include <string.h>
 #include <math.h>
 
-// New mode constant for MST
+// Mode constants
 #define MODE_ADD_NODE       1
 #define MODE_ADD_EDGE       2
 #define MODE_SHORTEST_PATH  3
@@ -25,6 +25,48 @@
 #define BUTTON_HEIGHT 40
 #define BUTTON_PADDING 10
 
+// Dracula theme color definitions
+#define COLOR_BG_R 0.157f       // #282a36 background
+#define COLOR_BG_G 0.165f
+#define COLOR_BG_B 0.212f
+
+#define COLOR_NODE_FILL_R 0.384f  // #6272a4 node fill
+#define COLOR_NODE_FILL_G 0.447f
+#define COLOR_NODE_FILL_B 0.643f
+
+#define COLOR_NODE_BORDER_R 0.972f  // #f8f8f2 node border
+#define COLOR_NODE_BORDER_G 0.972f
+#define COLOR_NODE_BORDER_B 0.949f
+
+#define COLOR_EDGE_R 1.0f         // #ff79c6 edge color
+#define COLOR_EDGE_G 0.474f
+#define COLOR_EDGE_B 0.776f
+
+#define COLOR_MST_R 0.314f        // #50fa7b MST edge color
+#define COLOR_MST_G 0.980f
+#define COLOR_MST_B 0.482f
+
+#define COLOR_SP_R 0.545f         // #8be9fd shortest path color
+#define COLOR_SP_G 0.914f
+#define COLOR_SP_B 0.992f
+
+#define COLOR_MENU_BG_R 0.2667f   // #44475a menu background
+#define COLOR_MENU_BG_G 0.278f
+#define COLOR_MENU_BG_B 0.3529f
+
+#define COLOR_BUTTON_ACTIVE_R 0.741f  // #bd93f9 active button
+#define COLOR_BUTTON_ACTIVE_G 0.576f
+#define COLOR_BUTTON_ACTIVE_B 0.976f
+
+#define COLOR_BUTTON_INACTIVE_R 0.384f  // same as node fill
+#define COLOR_BUTTON_INACTIVE_G 0.447f
+#define COLOR_BUTTON_INACTIVE_B 0.643f
+
+#define COLOR_TEXT_R 0.972f      // #f8f8f2 text color
+#define COLOR_TEXT_G 0.972f
+#define COLOR_TEXT_B 0.949f
+
+// Global state variables
 int current_mode = MODE_ADD_NODE;
 int selected_node = -1;    // For add edge mode
 int sp_selected = -1;      // For shortest path mode
@@ -65,11 +107,88 @@ int find_edge_near(float x, float y);
 float pointToSegmentDistance(float px, float py, float ax, float ay, float bx, float by);
 void delete_node(int node_index);
 void draw_mst();
+void update_layout();
+void idle();
 
-//
+void update_layout() {
+    if (node_count == 0) return;
+    
+    // Compute the wall's x-coordinate in GL space so that nodes don't enter the side panel.
+    int winWidth = glutGet(GLUT_WINDOW_WIDTH);
+    float wall_x = (MENU_WIDTH_PIXELS / (float)winWidth) * 2.0f - 1.0f; // e.g. ~ -0.625 for 800px width
+
+    float area = 4.0f; // (2x2 coordinate system from -1 to 1)
+    float k = sqrt(area / (float)node_count);
+    float disp[MAX_NODES][2];
+    for (int i = 0; i < node_count; i++) {
+        disp[i][0] = 0;
+        disp[i][1] = 0;
+    }
+    
+    // Repulsive forces between all pairs of nodes
+    for (int i = 0; i < node_count; i++) {
+        for (int j = 0; j < node_count; j++) {
+            if (i == j) continue;
+            float dx = nodes[i].x - nodes[j].x;
+            float dy = nodes[i].y - nodes[j].y;
+            float dist = sqrt(dx * dx + dy * dy);
+            if (dist < 0.001f) dist = 0.001f;
+            float force = (k * k) / dist;
+            disp[i][0] += (dx / dist) * force;
+            disp[i][1] += (dy / dist) * force;
+        }
+    }
+    
+    // Attractive forces for nodes connected by an edge
+    for (int i = 0; i < edge_count; i++) {
+        int src = edges[i].src;
+        int dest = edges[i].dest;
+        float dx = nodes[src].x - nodes[dest].x;
+        float dy = nodes[src].y - nodes[dest].y;
+        float dist = sqrt(dx * dx + dy * dy);
+        if (dist < 0.001f) dist = 0.001f;
+        float force = (dist * dist) / k;
+        float fx = (dx / dist) * force;
+        float fy = (dy / dist) * force;
+        disp[src][0] -= fx;
+        disp[src][1] -= fy;
+        disp[dest][0] += fx;
+        disp[dest][1] += fy;
+    }
+    
+    // Centering force: pull nodes toward the center (0,0)
+    float centering_strength = 4.0f;
+    for (int i = 0; i < node_count; i++) {
+        disp[i][0] -= nodes[i].x * centering_strength;
+        disp[i][1] -= nodes[i].y * centering_strength;
+    }
+    
+    // Update node positions with maximum displacement and damping factor
+    float temp = 0.05f;    // maximum allowed move per iteration
+    float damping = 0.1f;  // damping factor to reduce oscillations
+    for (int i = 0; i < node_count; i++) {
+        float disp_length = sqrt(disp[i][0] * disp[i][0] + disp[i][1] * disp[i][1]);
+        if (disp_length < 0.001f) disp_length = 0.001f;
+        float dx = (disp[i][0] / disp_length) * fmin(disp_length, temp);
+        float dy = (disp[i][1] / disp_length) * fmin(disp_length, temp);
+        nodes[i].x += dx * damping;
+        nodes[i].y += dy * damping;
+        // Clamp x so that nodes do not cross the wall, and clamp y to [-1,1]
+        if (nodes[i].x < wall_x) nodes[i].x = wall_x;
+        if (nodes[i].x > 1) nodes[i].x = 1;
+        if (nodes[i].y < -1) nodes[i].y = -1;
+        if (nodes[i].y > 1) nodes[i].y = 1;
+    }
+}
+
+
+// Idle function for continuous layout updates
+void idle() {
+    update_layout();
+    glutPostRedisplay();
+}
+
 // --- Utility drawing functions ---
-//
-
 void draw_string(float x, float y, char *str) {
   glRasterPos2f(x, y);
   for (char *c = str; *c != '\0'; c++) {
@@ -84,19 +203,17 @@ void draw_string_pixel(int x, int y, char *str) {
   }
 }
 
-//
 // --- Drawing the graph ---
-//
 
-// Draw nodes as light blue circles with centered labels
+// Draw nodes as circles with centered labels (using Dracula theme)
 void draw_nodes() {
   int num_segments = 50;
   for (int i = 0; i < node_count; i++) {
     float cx = nodes[i].x;
     float cy = nodes[i].y;
 
-    // Draw filled circle (light blue)
-    glColor3f(0.68f, 0.85f, 0.90f); // light blue
+    // Filled circle (node fill color)
+    glColor3f(COLOR_NODE_FILL_R, COLOR_NODE_FILL_G, COLOR_NODE_FILL_B);
     glBegin(GL_TRIANGLE_FAN);
       glVertex2f(cx, cy);
       for (int j = 0; j <= num_segments; j++) {
@@ -107,8 +224,8 @@ void draw_nodes() {
       }
     glEnd();
 
-    // Draw circle border
-    glColor3f(0.0f, 0.0f, 0.0f); // black
+    // Circle border (node border color)
+    glColor3f(COLOR_NODE_BORDER_R, COLOR_NODE_BORDER_G, COLOR_NODE_BORDER_B);
     glLineWidth(1.0f);
     glBegin(GL_LINE_LOOP);
       for (int j = 0; j <= num_segments; j++) {
@@ -119,16 +236,16 @@ void draw_nodes() {
       }
     glEnd();
 
-    // Draw label inside circle (adjust y offset for centering)
+    // Label centered in the circle
     char label[2] = {nodes[i].label, '\0'};
-    glColor3f(0.0f, 0.0f, 0.0f);
+    glColor3f(COLOR_TEXT_R, COLOR_TEXT_G, COLOR_TEXT_B);
     draw_string(cx - 0.008f, cy - 0.02f, label);
   }
 }
 
-// Draw edges as bold light pink lines with labels offset perpendicularly
+// Draw edges (using Dracula theme)
 void draw_edges() {
-  glColor3f(1.0f, 0.71f, 0.76f); // light pink
+  glColor3f(COLOR_EDGE_R, COLOR_EDGE_G, COLOR_EDGE_B);
   glLineWidth(4.0f);
   glBegin(GL_LINES);
   for (int i = 0; i < edge_count; i++) {
@@ -149,7 +266,7 @@ void draw_edges() {
   }
   glEnd();
 
-  // Draw edge weight labels at a perpendicular offset from the midpoint
+  // Draw edge weight labels
   for (int i = 0; i < edge_count; i++) {
     Node src = nodes[edges[i].src];
     Node dest = nodes[edges[i].dest];
@@ -166,25 +283,24 @@ void draw_edges() {
     float midX = (startX + endX) / 2;
     float midY = (startY + endY) / 2;
 
-    // Perpendicular offset for label (adjust label_offset as needed)
     float label_offset = 0.03f;
-    float perpX = -dy / d; // normalized perpendicular vector
+    float perpX = -dy / d;
     float perpY = dx / d;
     float labelX = midX + label_offset * perpX;
     float labelY = midY + label_offset * perpY;
 
     char weight_str[10];
     sprintf(weight_str, "%.1f", edges[i].weight);
-    glColor3f(1.0f, 1.0f, 1.0f);
+    glColor3f(COLOR_TEXT_R, COLOR_TEXT_G, COLOR_TEXT_B);
     draw_string(labelX - 0.015f, labelY - 0.015f, weight_str);
   }
 }
 
-// Draw shortest path segments (only in shortest path mode)
+// Draw shortest path (using Dracula theme)
 void draw_shortest_path() {
   if (shortest_path_length < 2)
     return;
-  glColor3f(0.75f, 0.75f, 0.75f); // silver
+  glColor3f(COLOR_SP_R, COLOR_SP_G, COLOR_SP_B);
   glLineWidth(4.0f);
   glBegin(GL_LINES);
   for (int i = 0; i < shortest_path_length - 1; i++) {
@@ -206,12 +322,8 @@ void draw_shortest_path() {
   glEnd();
 }
 
-//
-// --- Compute and draw the MST using Kruskal's algorithm ---
-//
-
+// Draw MST using Kruskal's algorithm (using Dracula theme)
 void draw_mst() {
-  // Structure to hold MST edge info
   typedef struct {
     int src, dest;
     float weight;
@@ -220,7 +332,6 @@ void draw_mst() {
   MstEdge mst_edges[MAX_NODES];
   int mst_count = 0;
 
-  // Union-Find setup
   int parent[MAX_NODES];
   for (int i = 0; i < node_count; i++) {
     parent[i] = i;
@@ -238,7 +349,6 @@ void draw_mst() {
     parent[rootx] = rooty;
   };
 
-  // Create an array of indices for edges and sort them by weight (simple bubble sort)
   int indices[MAX_NODES * MAX_NODES];
   for (int i = 0; i < edge_count; i++) {
     indices[i] = i;
@@ -253,7 +363,6 @@ void draw_mst() {
     }
   }
 
-  // Kruskal's algorithm
   for (int i = 0; i < edge_count; i++) {
     int idx = indices[i];
     int u = edges[idx].src;
@@ -269,8 +378,7 @@ void draw_mst() {
     }
   }
 
-  // Draw the MST edges (with endpoints offset to node boundaries)
-  glColor3f(1.0f, 0.65f, 0.0f); // orange color for MST
+  glColor3f(COLOR_MST_R, COLOR_MST_G, COLOR_MST_B);
   glLineWidth(4.0f);
   glBegin(GL_LINES);
   for (int i = 0; i < mst_count; i++) {
@@ -292,10 +400,7 @@ void draw_mst() {
   glEnd();
 }
 
-//
-// --- Drawing the side menu ---
-//
-
+// Draw the side menu (using Dracula theme)
 void draw_menu_pixel() {
   int w = glutGet(GLUT_WINDOW_WIDTH);
   int h = glutGet(GLUT_WINDOW_HEIGHT);
@@ -309,7 +414,7 @@ void draw_menu_pixel() {
   glLoadIdentity();
 
   // Menu background
-  glColor3f(0.2f, 0.2f, 0.2f);
+  glColor3f(COLOR_MENU_BG_R, COLOR_MENU_BG_G, COLOR_MENU_BG_B);
   glBegin(GL_QUADS);
     glVertex2i(0, 0);
     glVertex2i(MENU_WIDTH_PIXELS, 0);
@@ -319,80 +424,86 @@ void draw_menu_pixel() {
 
   int y = 20;
   // Add Node button
-  glColor3f(current_mode == MODE_ADD_NODE ? 0.0f : 0.4f, 0.6f,
-            current_mode == MODE_ADD_NODE ? 0.9f : 0.4f);
+  glColor3f(current_mode == MODE_ADD_NODE ? COLOR_BUTTON_ACTIVE_R : COLOR_BUTTON_INACTIVE_R,
+            current_mode == MODE_ADD_NODE ? COLOR_BUTTON_ACTIVE_G : COLOR_BUTTON_INACTIVE_G,
+            current_mode == MODE_ADD_NODE ? COLOR_BUTTON_ACTIVE_B : COLOR_BUTTON_INACTIVE_B);
   glBegin(GL_QUADS);
     glVertex2i(10, y);
     glVertex2i(BUTTON_WIDTH + 10, y);
     glVertex2i(BUTTON_WIDTH + 10, y + BUTTON_HEIGHT);
     glVertex2i(10, y + BUTTON_HEIGHT);
   glEnd();
-  glColor3f(1.0f, 1.0f, 1.0f);
+  glColor3f(COLOR_TEXT_R, COLOR_TEXT_G, COLOR_TEXT_B);
   draw_string_pixel(15, y + 25, "Add Node");
 
   y += BUTTON_HEIGHT + BUTTON_PADDING;
   // Add Edge button
-  glColor3f(current_mode == MODE_ADD_EDGE ? 0.0f : 0.4f, 0.6f,
-            current_mode == MODE_ADD_EDGE ? 0.9f : 0.4f);
+  glColor3f(current_mode == MODE_ADD_EDGE ? COLOR_BUTTON_ACTIVE_R : COLOR_BUTTON_INACTIVE_R,
+            current_mode == MODE_ADD_EDGE ? COLOR_BUTTON_ACTIVE_G : COLOR_BUTTON_INACTIVE_G,
+            current_mode == MODE_ADD_EDGE ? COLOR_BUTTON_ACTIVE_B : COLOR_BUTTON_INACTIVE_B);
   glBegin(GL_QUADS);
     glVertex2i(10, y);
     glVertex2i(BUTTON_WIDTH + 10, y);
     glVertex2i(BUTTON_WIDTH + 10, y + BUTTON_HEIGHT);
     glVertex2i(10, y + BUTTON_HEIGHT);
   glEnd();
-  glColor3f(1.0f, 1.0f, 1.0f);
+  glColor3f(COLOR_TEXT_R, COLOR_TEXT_G, COLOR_TEXT_B);
   draw_string_pixel(15, y + 25, "Add Edge");
 
   y += BUTTON_HEIGHT + BUTTON_PADDING;
   // Shortest Path button
-  glColor3f(current_mode == MODE_SHORTEST_PATH ? 0.0f : 0.4f, 0.6f,
-            current_mode == MODE_SHORTEST_PATH ? 0.9f : 0.4f);
+  glColor3f(current_mode == MODE_SHORTEST_PATH ? COLOR_BUTTON_ACTIVE_R : COLOR_BUTTON_INACTIVE_R,
+            current_mode == MODE_SHORTEST_PATH ? COLOR_BUTTON_ACTIVE_G : COLOR_BUTTON_INACTIVE_G,
+            current_mode == MODE_SHORTEST_PATH ? COLOR_BUTTON_ACTIVE_B : COLOR_BUTTON_INACTIVE_B);
   glBegin(GL_QUADS);
     glVertex2i(10, y);
     glVertex2i(BUTTON_WIDTH + 10, y);
     glVertex2i(BUTTON_WIDTH + 10, y + BUTTON_HEIGHT);
     glVertex2i(10, y + BUTTON_HEIGHT);
   glEnd();
-  glColor3f(1.0f, 1.0f, 1.0f);
+  glColor3f(COLOR_TEXT_R, COLOR_TEXT_G, COLOR_TEXT_B);
   draw_string_pixel(15, y + 25, "Shortest Path");
 
   y += BUTTON_HEIGHT + BUTTON_PADDING;
   // Edit Weight button
-  glColor3f(current_mode == MODE_EDIT_WEIGHT ? 0.0f : 0.4f, 0.6f,
-            current_mode == MODE_EDIT_WEIGHT ? 0.9f : 0.4f);
+  glColor3f(current_mode == MODE_EDIT_WEIGHT ? COLOR_BUTTON_ACTIVE_R : COLOR_BUTTON_INACTIVE_R,
+            current_mode == MODE_EDIT_WEIGHT ? COLOR_BUTTON_ACTIVE_G : COLOR_BUTTON_INACTIVE_G,
+            current_mode == MODE_EDIT_WEIGHT ? COLOR_BUTTON_ACTIVE_B : COLOR_BUTTON_INACTIVE_B);
   glBegin(GL_QUADS);
     glVertex2i(10, y);
     glVertex2i(BUTTON_WIDTH + 10, y);
     glVertex2i(BUTTON_WIDTH + 10, y + BUTTON_HEIGHT);
     glVertex2i(10, y + BUTTON_HEIGHT);
   glEnd();
-  glColor3f(1.0f, 1.0f, 1.0f);
+  glColor3f(COLOR_TEXT_R, COLOR_TEXT_G, COLOR_TEXT_B);
   draw_string_pixel(15, y + 25, "Edit Weight");
 
   y += BUTTON_HEIGHT + BUTTON_PADDING;
   // Delete Node button
-  glColor3f(current_mode == MODE_DELETE_NODE ? 0.0f : 0.4f, 0.6f,
-            current_mode == MODE_DELETE_NODE ? 0.9f : 0.4f);
+  glColor3f(current_mode == MODE_DELETE_NODE ? COLOR_BUTTON_ACTIVE_R : COLOR_BUTTON_INACTIVE_R,
+            current_mode == MODE_DELETE_NODE ? COLOR_BUTTON_ACTIVE_G : COLOR_BUTTON_INACTIVE_G,
+            current_mode == MODE_DELETE_NODE ? COLOR_BUTTON_ACTIVE_B : COLOR_BUTTON_INACTIVE_B);
   glBegin(GL_QUADS);
     glVertex2i(10, y);
     glVertex2i(BUTTON_WIDTH + 10, y);
     glVertex2i(BUTTON_WIDTH + 10, y + BUTTON_HEIGHT);
     glVertex2i(10, y + BUTTON_HEIGHT);
   glEnd();
-  glColor3f(1.0f, 1.0f, 1.0f);
+  glColor3f(COLOR_TEXT_R, COLOR_TEXT_G, COLOR_TEXT_B);
   draw_string_pixel(15, y + 25, "Delete Node");
 
   y += BUTTON_HEIGHT + BUTTON_PADDING;
   // MST button
-  glColor3f(current_mode == MODE_MST ? 0.0f : 0.4f, 0.6f,
-            current_mode == MODE_MST ? 0.9f : 0.4f);
+  glColor3f(current_mode == MODE_MST ? COLOR_BUTTON_ACTIVE_R : COLOR_BUTTON_INACTIVE_R,
+            current_mode == MODE_MST ? COLOR_BUTTON_ACTIVE_G : COLOR_BUTTON_INACTIVE_G,
+            current_mode == MODE_MST ? COLOR_BUTTON_ACTIVE_B : COLOR_BUTTON_INACTIVE_B);
   glBegin(GL_QUADS);
     glVertex2i(10, y);
     glVertex2i(BUTTON_WIDTH + 10, y);
     glVertex2i(BUTTON_WIDTH + 10, y + BUTTON_HEIGHT);
     glVertex2i(10, y + BUTTON_HEIGHT);
   glEnd();
-  glColor3f(1.0f, 1.0f, 1.0f);
+  glColor3f(COLOR_TEXT_R, COLOR_TEXT_G, COLOR_TEXT_B);
   draw_string_pixel(15, y + 25, "MST");
 
   glPopMatrix();
@@ -401,15 +512,11 @@ void draw_menu_pixel() {
   glMatrixMode(GL_MODELVIEW);
 }
 
-//
-// --- Weight input popup ---
-//
-
+// Weight input popup (using Dracula theme)
 void draw_weight_input() {
   int w = glutGet(GLUT_WINDOW_WIDTH);
   int h = glutGet(GLUT_WINDOW_HEIGHT);
 
-  // Draw a small centered input box
   int box_width = 200;
   int box_height = 50;
   int x = (w - box_width) / 2;
@@ -423,8 +530,8 @@ void draw_weight_input() {
   glPushMatrix();
   glLoadIdentity();
 
-  // Box background
-  glColor3f(1.0f, 1.0f, 1.0f);
+  // Box background (using menu background color)
+  glColor3f(COLOR_MENU_BG_R, COLOR_MENU_BG_G, COLOR_MENU_BG_B);
   glBegin(GL_QUADS);
     glVertex2i(x, y);
     glVertex2i(x + box_width, y);
@@ -432,8 +539,8 @@ void draw_weight_input() {
     glVertex2i(x, y + box_height);
   glEnd();
 
-  // Draw border
-  glColor3f(0.0f, 0.0f, 0.0f);
+  // Border (text color)
+  glColor3f(COLOR_TEXT_R, COLOR_TEXT_G, COLOR_TEXT_B);
   glLineWidth(2.0f);
   glBegin(GL_LINE_LOOP);
     glVertex2i(x, y);
@@ -442,7 +549,7 @@ void draw_weight_input() {
     glVertex2i(x, y + box_height);
   glEnd();
 
-  // Draw prompt text
+  // Prompt text
   char prompt[64];
   char fromChar, toChar;
   if (editing_existing_edge) {
@@ -463,9 +570,7 @@ void draw_weight_input() {
   glMatrixMode(GL_MODELVIEW);
 }
 
-//
 // --- Utility functions ---
-//
 
 int find_node(float x, float y) {
   for (int i = 0; i < node_count; i++) {
@@ -481,7 +586,6 @@ void add_edge(int src, int dest, float weight) {
   edges[edge_count++] = (Edge){src, dest, weight};
 }
 
-// Compute distance from point (px,py) to segment from (ax,ay) to (bx,by)
 float pointToSegmentDistance(float px, float py, float ax, float ay, float bx, float by) {
   float vx = bx - ax, vy = by - ay;
   float wx = px - ax, wy = py - ay;
@@ -495,9 +599,8 @@ float pointToSegmentDistance(float px, float py, float ax, float ay, float bx, f
   return sqrt((px - projx) * (px - projx) + (py - projy) * (py - projy));
 }
 
-// Find an edge whose line segment is near the point (x,y)
 int find_edge_near(float x, float y) {
-  const float threshold = 0.05f; // adjust as needed
+  const float threshold = 0.05f;
   for (int i = 0; i < edge_count; i++) {
     Node a = nodes[edges[i].src];
     Node b = nodes[edges[i].dest];
@@ -508,10 +611,7 @@ int find_edge_near(float x, float y) {
   return -1;
 }
 
-//
 // --- Dijkstra's algorithm ---
-//
-
 void dijkstra(int start, int end) {
   float dist[MAX_NODES];
   bool visited[MAX_NODES];
@@ -565,12 +665,8 @@ void dijkstra(int start, int end) {
   }
 }
 
-//
 // --- Delete node and update graph ---
-//
-
 void delete_node(int node_index) {
-  // Remove all edges connected to node_index
   for (int i = 0; i < edge_count; ) {
     if (edges[i].src == node_index || edges[i].dest == node_index) {
       for (int j = i; j < edge_count - 1; j++) {
@@ -578,13 +674,11 @@ void delete_node(int node_index) {
       }
       edge_count--;
     } else {
-      // Adjust indices for edges coming after the deleted node
       if (edges[i].src > node_index) edges[i].src--;
       if (edges[i].dest > node_index) edges[i].dest--;
       i++;
     }
   }
-  // Remove the node from the array and update labels
   for (int i = node_index; i < node_count - 1; i++) {
     nodes[i] = nodes[i + 1];
     nodes[i].label = 'A' + i;
@@ -592,10 +686,7 @@ void delete_node(int node_index) {
   node_count--;
 }
 
-//
 // --- Mouse callback ---
-//
-
 void mouse(int button, int state, int x, int y) {
   int w = glutGet(GLUT_WINDOW_WIDTH);
   int h = glutGet(GLUT_WINDOW_HEIGHT);
@@ -604,7 +695,7 @@ void mouse(int button, int state, int x, int y) {
 
   if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
     if (x < MENU_WIDTH_PIXELS) {
-      int y_pos = y; // Using window pixel coordinates
+      int y_pos = y;
       if (y_pos >= 20 && y_pos <= 60)
         current_mode = MODE_ADD_NODE;
       else if (y_pos >= 70 && y_pos <= 110)
@@ -667,15 +758,11 @@ void mouse(int button, int state, int x, int y) {
         delete_node(node);
       }
     }
-    // In MST mode, no direct mouse action is required.
     glutPostRedisplay();
   }
 }
 
-//
 // --- Keyboard callback ---
-//
-
 void keyboard(unsigned char key, int x, int y) {
   if (inputting_weight) {
     if (key == '\r' || key == '\n') {
@@ -691,13 +778,12 @@ void keyboard(unsigned char key, int x, int y) {
       }
       inputting_weight = false;
       weight_input_buffer[0] = '\0';
-    } else if (key == 8 || key == 127) { // Backspace
+    } else if (key == 8 || key == 127) {
       int len = strlen(weight_input_buffer);
       if (len > 0)
         weight_input_buffer[len - 1] = '\0';
     } else if ((isdigit(key) || key == '.') && (strlen(weight_input_buffer) < 31)) {
       if (key == '.' && strchr(weight_input_buffer, '.') != NULL) {
-        // Prevent a second dot
       } else {
         char keyStr[2] = { key, '\0' };
         strncat(weight_input_buffer, keyStr, 1);
@@ -707,10 +793,7 @@ void keyboard(unsigned char key, int x, int y) {
   }
 }
 
-//
 // --- Display callback ---
-//
-
 void display() {
   glClear(GL_COLOR_BUFFER_BIT);
 
@@ -735,21 +818,20 @@ void display() {
   glFlush();
 }
 
-//
 // --- Main ---
-//
-
 int main(int argc, char **argv) {
   glutInit(&argc, argv);
   glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
   glutInitWindowSize(800, 600);
-  glutCreateWindow("Graph Visualizer");
+  glutCreateWindow("Graph Visualizer - Dracula Theme");
 
-  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  // Set the background to Dracula theme color
+  glClearColor(COLOR_BG_R, COLOR_BG_G, COLOR_BG_B, 1.0f);
 
   glutDisplayFunc(display);
   glutMouseFunc(mouse);
   glutKeyboardFunc(keyboard);
+  glutIdleFunc(idle);
   glutMainLoop();
   return 0;
 }
