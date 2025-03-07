@@ -1,32 +1,22 @@
 #include <GL/freeglut_std.h>
 #include <GL/gl.h>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <cstring>
 #include <math.h>
 #include <filesystem>
-
+#include "graph.hpp"
+#include <format>
 
 #include <GL/glut.h>
 #include <GL/glu.h>
+#include <vector>
 
 
 #define PI 3.14159
 
 
-struct RGB {
-  float r;
-  float g;
-  float b;
-  float a;
-
-  RGB(float r_, float g_, float b_, float a_ = 0.0f) {
-    r = r_;
-    g = g_;
-    b = b_;
-    a = a_;
-  }
-
-};
 
 
 void RenderString(float x, float y, void *font, const char* string, RGB rgb) {  
@@ -49,7 +39,7 @@ void draw_line(GLfloat cx, GLfloat cy, GLfloat cxx, GLfloat cyy, RGB rgb) {
 
 void draw_poly(GLfloat cx, GLfloat cy, GLfloat r, int num, RGB rgb) {
   float offset_angle = 2 * PI / num;
-  glBegin(GL_POLYGON);
+  glBegin(GL_LINE_LOOP);
   glColor3f(rgb.r, rgb.g, rgb.b); 
   for(int i = 0; i < num; i++) {
     float current_angle = i*offset_angle;
@@ -63,6 +53,57 @@ void draw_poly(GLfloat cx, GLfloat cy, GLfloat r, int num, RGB rgb) {
 void draw_circle(GLfloat cx, GLfloat cy, GLfloat r, RGB rgb) { draw_poly(cx, cy, r, 50, rgb);}
 
 
+bool is_in(int key, std::vector<Graph_Node*> &nodes) {// linear search O(n) unfortunately
+
+  std::cout << "\tIS IN: "  << nodes.size() << std::endl;
+
+  for (int i = 0; i < nodes.size(); i++) {
+    
+    std::cout << "nodes[" << i << "]->key = " << nodes[i]->key << std::endl;
+    std::cout << "key = " << key << std::endl;
+    
+    if(nodes[i]->key == key) {
+      return true; 
+    }
+  }
+  return false;
+}
+
+void draw_edge(Edge* e) {
+  draw_line(e->end1->cx, e->end1->cy, e->end2->cx, e->end2->cy, e->color);
+}
+
+void draw_graph(Graph_Node *g, bool first = true, bool already_checked = false) {
+  static std::vector<Graph_Node*> nodes;
+  std::cout << "DRAW GRAPH" << std::endl;;
+
+  if (first) nodes.clear();
+
+  if (!already_checked)
+    if(is_in(g->key, nodes)) return;
+  
+  // Do stuff if the key already exists, ie it's already drawn
+  draw_circle(g->cx, g->cy, 0.1, g->color);
+
+  char* format = (char*) malloc(sizeof(char) * 20);
+  sprintf(format, "%i", g->value);
+  RenderString(g->cx, g->cy, GLUT_BITMAP_TIMES_ROMAN_10, format, g->color); // give formated string instead of "Node"
+
+  nodes.push_back(g);
+
+  for(int i = 0; i < g->edges.size(); i++) { // recursively draw the rest
+    Edge current = g->edges[i];
+    if (!is_in(current.end1->key, nodes)) {
+      draw_graph(current.end1, false, true);
+      draw_edge(&current);
+    }
+    if (!is_in(current.end2->key, nodes)) {
+      draw_graph(current.end2, false, true); 
+      draw_edge(&current);
+    }
+  }
+}
+ 
 void renderScene(void) {
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -73,14 +114,21 @@ void renderScene(void) {
 	// 	glVertex3f(1,0,0.0);
 	// glEnd();
 
-	draw_line(0, 0, 1, 1, RGB(1, 1, 1));
 
-	draw_poly(0, 0, 0.5, 50, RGB(0, 0, 1));
+	Graph_Node g = Graph_Node_new(10);
 
-	draw_circle(1, 1, 0.2, RGB(0, 1, 0));
+	Graph_Node g2 = Graph_Node_new(20, 0.5, 0.5);
 
-	RenderString(0, 0, GLUT_BITMAP_TIMES_ROMAN_10, "HELLO GLUT", RGB(1, 0, 0));
+	Edge e = edge_new(&g, &g2);
+
+	g.edges.push_back(e);
+	g2.edges.push_back(e);
+
+
 	
+	draw_graph(&g);
+
+
 	glutSwapBuffers();
 }
 
