@@ -13,11 +13,15 @@
 #include <GL/glu.h>
 #include <vector>
 
-
 #define PI 3.14159
 
-
-
+// Dracula Theme Colors
+RGB dracula_bg(0.15686f, 0.1647f, 0.21176f);    // #282A36
+RGB dracula_fg(0.9725f, 0.9725f, 0.9490f);     // #F8F8F2
+RGB dracula_pink(1.0f, 0.4745f, 0.7764f);      // #FF79C6
+RGB dracula_green(0.3137f, 0.9804f, 0.4824f);  // #50FA7B
+RGB dracula_yellow(0.9451f, 0.9804f, 0.5490f); // #F1FA8C
+RGB dracula_cyan(0.5451f, 0.9137f, 0.9922f);   // #8BE9FD
 
 void RenderString(float x, float y, void *font, const char* string, RGB rgb) {  
   glColor3f(rgb.r, rgb.g, rgb.b); 
@@ -35,8 +39,6 @@ void draw_line(GLfloat cx, GLfloat cy, GLfloat cxx, GLfloat cyy, RGB rgb) {
   glEnd();
 }
 
-
-
 void draw_poly(GLfloat cx, GLfloat cy, GLfloat r, int num, RGB rgb) {
   float offset_angle = 2 * PI / num;
   glBegin(GL_LINE_LOOP);
@@ -50,21 +52,13 @@ void draw_poly(GLfloat cx, GLfloat cy, GLfloat r, int num, RGB rgb) {
   glEnd();
 }
 
-void draw_circle(GLfloat cx, GLfloat cy, GLfloat r, RGB rgb) { draw_poly(cx, cy, r, 50, rgb);}
+void draw_circle(GLfloat cx, GLfloat cy, GLfloat r, RGB rgb) { 
+  draw_poly(cx, cy, r, 50, rgb);
+}
 
-
-bool is_in(int key, std::vector<Graph_Node*> &nodes) {// linear search O(n) unfortunately
-
-  std::cout << "\tIS IN: "  << nodes.size() << std::endl;
-
-  for (int i = 0; i < nodes.size(); i++) {
-    
-    std::cout << "nodes[" << i << "]->key = " << nodes[i]->key << std::endl;
-    std::cout << "key = " << key << std::endl;
-    
-    if(nodes[i]->key == key) {
-      return true; 
-    }
+bool is_in(int key, std::vector<Graph_Node*> &nodes) {
+  for (Graph_Node* node : nodes) {
+    if(node->key == key) return true; 
   }
   return false;
 }
@@ -75,24 +69,18 @@ void draw_edge(Edge* e) {
 
 void draw_graph(Graph_Node *g, bool first = true, bool already_checked = false) {
   static std::vector<Graph_Node*> nodes;
-  std::cout << "DRAW GRAPH" << std::endl;;
-
   if (first) nodes.clear();
-
-  if (!already_checked)
-    if(is_in(g->key, nodes)) return;
+  if (!already_checked && is_in(g->key, nodes)) return;
   
-  // Do stuff if the key already exists, ie it's already drawn
   draw_circle(g->cx, g->cy, 0.1, g->color);
-
-  char* format = (char*) malloc(sizeof(char) * 20);
+  
+  char format[20];
   sprintf(format, "%i", g->value);
-  RenderString(g->cx, g->cy, GLUT_BITMAP_TIMES_ROMAN_10, format, g->color); // give formated string instead of "Node"
+  RenderString(g->cx, g->cy, GLUT_BITMAP_TIMES_ROMAN_10, format, dracula_fg); 
 
   nodes.push_back(g);
 
-  for(int i = 0; i < g->edges.size(); i++) { // recursively draw the rest
-    Edge current = g->edges[i];
+  for(Edge& current : g->edges) {
     if (!is_in(current.end1->key, nodes)) {
       draw_graph(current.end1, false, true);
       draw_edge(&current);
@@ -103,82 +91,46 @@ void draw_graph(Graph_Node *g, bool first = true, bool already_checked = false) 
     }
   }
 }
- 
+
 void renderScene(void) {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    // Create nodes with Dracula colors
+    Graph_Node g = Graph_Node_new(10, -0.5f, 0.0f, dracula_cyan);
+    Graph_Node g2 = Graph_Node_new(20, 0.5f, 0.0f, dracula_yellow);
 
-	// glBegin(GL_TRIANGLES);
-	// 	glVertex3f(-1,-1,0.0);
-	// 	glVertex3f(-1,1,0.0);
-	// 	glVertex3f(1,0,0.0);
-	// glEnd();
+    // Create edge with Dracula pink
+    Edge e = edge_new(&g, &g2, dracula_pink);
 
+    g.edges.push_back(e);
+    g2.edges.push_back(e);
+    
+    draw_graph(&g);
 
-	Graph_Node g = Graph_Node_new(10);
-
-	Graph_Node g2 = Graph_Node_new(20, 0.5, 0.5);
-
-	Edge e = edge_new(&g, &g2);
-
-	g.edges.push_back(e);
-	g2.edges.push_back(e);
-
-
-	
-	draw_graph(&g);
-
-
-	glutSwapBuffers();
+    glutSwapBuffers();
 }
 
 void changeSize(int w, int h) {
-
-	// Prevent a divide by zero, when window is too short
-	// (you cant make a window of zero width).
-	if(h == 0)
-		h = 1;
-	float ratio = 1.0* w / h;
-
-	// Use the Projection Matrix
-	glMatrixMode(GL_PROJECTION);
-
-        // Reset Matrix
-	glLoadIdentity();
-
-	// Set the viewport to be the entire window
-	glViewport(0, 0, w, h);
-
-	// // Set the correct perspective.
-
-	gluPerspective(0, ratio, 1, 1000);
-
-	// Get Back to the Modelview
-	glMatrixMode(GL_MODELVIEW);
+    if(h == 0) h = 1;
+    float ratio = 1.0f * w / h;
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glViewport(0, 0, w, h);
+    gluPerspective(0, ratio, 1, 1000);
+    glMatrixMode(GL_MODELVIEW);
 }
 
-
-
 int main(int argc, char** argv) {
-  std::cout << "Hello GLUT" << std::endl;
- 
-  // INIT glut
   glutInit(&argc, argv);
-
-  // init glut window
   glutInitWindowSize(1920, 1080);
   glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
-
-  glutCreateWindow("HELLO WORLD");
-
-  // Register Callback
+  glutCreateWindow("Dracula Theme Graph");
   glutDisplayFunc(renderScene);
   glutReshapeFunc(changeSize);
   
-  // main loop
+  // Set Dracula background color
+  glClearColor(dracula_bg.r, dracula_bg.g, dracula_bg.b, 1.0f);
+  
   glutMainLoop();
-  
-
   return 0;
-  
 }
